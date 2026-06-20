@@ -1,0 +1,14 @@
+{
+  "name": "gongzhu-online",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "static": "python3 -m http.server 5173",
+    "preview": "node server/server.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
