@@ -257,6 +257,12 @@ button {
 .opponent > div:first-child {
   display: grid;
   gap: 2px;
+  min-width: 0;
+}
+
+.opponent strong,
+.opponent span {
+  overflow-wrap: anywhere;
 }
 
 .opponent b {
@@ -449,6 +455,8 @@ button {
 .handHeader {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   margin-bottom: 12px;
 }
@@ -469,6 +477,7 @@ button {
   flex-wrap: wrap;
   gap: 7px;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .scoreBadge,
@@ -478,6 +487,8 @@ button {
   font-size: 16px;
   font-weight: 950;
   line-height: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 6px 10px;
 }
 
@@ -565,6 +576,12 @@ button {
   position: absolute;
   right: -6px;
   top: -7px;
+}
+
+.card.collectedRevealCard::after {
+  background: #14b8a6;
+  color: white;
+  content: "收";
 }
 
 .card.lockedCard {
@@ -764,10 +781,32 @@ button {
   background: #fffaf2;
   border: 1px solid #d7c7ad;
   border-radius: 5px;
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
   font-size: 12px;
   font-weight: 900;
   line-height: 1;
   padding: 5px 6px;
+}
+
+.miniCard i {
+  background: #0f766e;
+  border-radius: 999px;
+  color: white;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1;
+  padding: 2px 3px;
+}
+
+.miniCard.red i {
+  background: #be123c;
+}
+
+.miniCard.specialMini {
+  border-color: #14b8a6;
 }
 
 .miniCard.red {
@@ -807,6 +846,12 @@ button {
   font-size: 13px;
   font-weight: 900;
   padding: 6px 9px;
+}
+
+.shownCard.collectedShownCard {
+  background: #ecfeff;
+  border-color: #67e8f9;
+  color: #155e75;
 }
 
 .discardPile {

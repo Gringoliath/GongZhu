@@ -18,6 +18,8 @@ import {
 const root = normalize(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 const rooms = new Map();
 const botPlayDelay = 425;
+const roomTtlMs = 6 * 60 * 60 * 1000;
+const cleanupIntervalMs = 5 * 60 * 1000;
 const mimeTypes = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
@@ -58,6 +60,16 @@ function roomError(res, status, message) {
   json(res, status, { error: message });
 }
 
+function touchRoom(room) {
+  room.updatedAt = Date.now();
+}
+
+function cleanupRooms(now = Date.now()) {
+  for (const [id, room] of rooms) {
+    if (now - room.updatedAt > roomTtlMs) rooms.delete(id);
+  }
+}
+
 function playerIndex(room, clientId) {
   return room.seats.findIndex((seat) => seat?.clientId === clientId);
 }
@@ -92,13 +104,16 @@ function createRoom(name) {
 
 function joinRoom(room, name, existingClientId) {
   const existing = existingClientId ? playerIndex(room, existingClientId) : -1;
-  if (existing >= 0) return existingClientId;
+  if (existing >= 0) {
+    touchRoom(room);
+    return existingClientId;
+  }
 
   const index = room.seats.findIndex((seat) => !seat);
   if (index < 0) return null;
   const clientId = makeClientId();
   room.seats[index] = { clientId, name: name || `玩家${index + 1}` };
-  room.updatedAt = Date.now();
+  touchRoom(room);
   return clientId;
 }
 
@@ -106,7 +121,7 @@ function addBot(room) {
   const index = room.seats.findIndex((seat) => !seat);
   if (index < 0) return false;
   room.seats[index] = { clientId: `bot-${room.id}-${index}`, name: `人机${index + 1}`, bot: true };
-  room.updatedAt = Date.now();
+  touchRoom(room);
   return true;
 }
 
@@ -207,7 +222,7 @@ function startRoomGame(room) {
   room.ready.clear();
   room.dealUntil = Date.now() + 625;
   room.botActionAt = 0;
-  room.updatedAt = Date.now();
+  touchRoom(room);
   return true;
 }
 
@@ -229,6 +244,7 @@ function handleAction(room, clientId, action) {
   if (!room.game) return "游戏尚未开始";
 
   if (action.type === "toggleReveal") {
+    if (room.ready.has(clientId)) return "已完成亮牌，不能再修改";
     const card = room.game.players[index].hand.find((item) => item.id === action.cardId);
     if (!card || !isRevealCandidate(card)) return "这张牌不能亮";
     room.game = toggleRevealCard(room.game, index, action.cardId);
@@ -281,6 +297,13 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
 
   try {
+    cleanupRooms();
+
+    if (req.method === "GET" && pathname === "/healthz") {
+      json(res, 200, { ok: true, rooms: rooms.size });
+      return;
+    }
+
     if (req.method === "POST" && pathname === "/api/rooms") {
       const body = await bodyJson(req);
       const { room, clientId } = createRoom(body.name);
@@ -303,6 +326,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && stateMatch) {
       const room = rooms.get(stateMatch[1].toUpperCase());
       if (!room) return roomError(res, 404, "房间不存在");
+      touchRoom(room);
       json(res, 200, { state: publicGame(room, url.searchParams.get("clientId")) });
       return;
     }
@@ -313,7 +337,7 @@ const server = http.createServer(async (req, res) => {
       if (!room) return roomError(res, 404, "房间不存在");
       const body = await bodyJson(req);
       const error = handleAction(room, body.clientId, body);
-      room.updatedAt = Date.now();
+      touchRoom(room);
       json(res, error ? 400 : 200, { error, state: publicGame(room, body.clientId) });
       return;
     }
@@ -326,6 +350,7 @@ const server = http.createServer(async (req, res) => {
       const index = playerIndex(room, body.clientId);
       if (index >= 0) room.seats[index] = null;
       if (room.seats.every((seat) => !seat || seat.bot)) rooms.delete(room.id);
+      else touchRoom(room);
       json(res, 200, { ok: true });
       return;
     }
@@ -336,6 +361,8 @@ const server = http.createServer(async (req, res) => {
     json(res, 500, { error: "服务器错误" });
   }
 });
+
+setInterval(cleanupRooms, cleanupIntervalMs).unref();
 
 const port = Number(process.env.PORT || 5173);
 server.listen(port, "0.0.0.0", () => {

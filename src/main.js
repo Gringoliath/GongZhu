@@ -27,20 +27,20 @@ let rulesOpen = false;
 
 const root = document.querySelector("#root");
 
+function specialLabel(card) {
+  if (card.suit === "spades" && card.rank === "Q") return "猪";
+  if (card.suit === "diamonds" && card.rank === "J") return "羊";
+  if (card.suit === "clubs" && card.rank === "10") return "变";
+  return "";
+}
+
 function cardButton(card, options = {}) {
   const red = card.suit === "hearts" || card.suit === "diamonds";
-  const specialLabel =
-    card.suit === "spades" && card.rank === "Q"
-      ? "猪"
-      : card.suit === "diamonds" && card.rank === "J"
-        ? "羊"
-        : card.suit === "clubs" && card.rank === "10"
-          ? "变"
-          : "";
+  const label = specialLabel(card);
   const button = document.createElement("button");
-  button.className = `card ${red ? "red" : "black"} ${specialLabel ? "specialCard" : ""} ${options.revealed ? "revealedCard" : ""} ${options.locked ? "lockedCard" : ""}`;
+  button.className = `card ${red ? "red" : "black"} ${label ? "specialCard" : ""} ${options.revealed ? "revealedCard" : ""} ${options.collected ? "collectedRevealCard" : ""} ${options.locked ? "lockedCard" : ""}`;
   button.disabled = Boolean(options.disabled);
-  button.innerHTML = `${specialLabel ? `<i>${specialLabel}</i>` : ""}<span>${card.rank}</span><strong>${suitLabel[card.suit]}</strong><small>${options.revealed ? "亮 x2" : suitName[card.suit]}</small>`;
+  button.innerHTML = `${label ? `<i>${label}</i>` : ""}<span>${card.rank}</span><strong>${suitLabel[card.suit]}</strong><small>${options.collected ? "已收回 x2" : options.revealed ? "亮 x2" : suitName[card.suit]}</small>`;
   if (options.onClick) button.addEventListener("click", options.onClick);
   return button;
 }
@@ -56,9 +56,14 @@ function pilePreview(cards, limit = 7) {
     .slice(-limit)
     .map((card) => {
       const revealed = isRevealed(game, card.id);
-      return `<span class="miniCard ${card.suit === "hearts" || card.suit === "diamonds" ? "red" : "black"} ${revealed ? "revealedMini" : ""}">${suitLabel[card.suit]}${card.rank}${revealed ? "×2" : ""}</span>`;
+      const label = specialLabel(card);
+      return `<span class="miniCard ${card.suit === "hearts" || card.suit === "diamonds" ? "red" : "black"} ${label ? "specialMini" : ""} ${revealed ? "revealedMini" : ""}">${label ? `<i>${label}</i>` : ""}${suitLabel[card.suit]}${card.rank}${revealed ? "×2" : ""}</span>`;
     })
     .join("");
+}
+
+function isCollectedRevealedCard(card) {
+  return isRevealed(game, card.id) && game.suitOpened.includes(card.suit);
 }
 
 function opponent(player, position) {
@@ -132,7 +137,7 @@ function render() {
                 ? `<div class="revealPanel">
                     <div>
                       <strong>选择亮牌</strong>
-                      <span>亮出的牌效果翻倍；该花色第一次出现后才解锁可打</span>
+                      <span>亮出的牌效果翻倍；该花色第一次出现并收墩后才解锁可打</span>
                     </div>
                     <div class="revealChoices"></div>
                     <button type="button" class="primaryButton startRoundButton" data-action="start-round">开始本轮</button>
@@ -153,7 +158,8 @@ function render() {
                   : game.revealedCards
                       .map((item) => {
                         const owner = game.players.find((player) => player.id === item.playerId);
-                        return `<span class="shownCard">${owner?.name ?? ""} ${cardLabelFromId(item.cardId)} x2</span>`;
+                        const collected = game.suitOpened.includes(item.suit);
+                        return `<span class="shownCard ${collected ? "collectedShownCard" : ""}">${owner?.name ?? ""} ${cardLabelFromId(item.cardId)} x2${collected ? " · 收" : ""}</span>`;
                       })
                       .join("")
               }
@@ -189,8 +195,10 @@ function render() {
                   <li>红桃 K：-40</li>
                   <li>红桃 Q：-30</li>
                   <li>红桃 J：-20</li>
+                  <li>红桃 2/3/4/5：0</li>
                   <li>其他红桃：每张 -10</li>
-                  <li>黑桃 Q：-100</li>
+                  <li>收齐 13 张红桃：+200</li>
+                  <li>黑桃 Q：-200</li>
                   <li>方块 J：+100</li>
                   <li>梅花 10：本家得分翻倍</li>
                   <li>亮牌：对应效果再翻倍</li>
@@ -213,7 +221,7 @@ function render() {
                   <li>按逆时针出牌，必须跟首牌花色；没有该花色时可垫任意牌。</li>
                   <li>同花色最大牌赢得本墩，并获得下一墩先手。</li>
                   <li>红桃、黑桃 Q、方块 J、梅花 10 会进入赢家计分牌堆，普通牌进入弃牌堆。</li>
-                  <li>每轮开始前可亮黑桃 Q、方块 J、梅花 10 或红桃 A；亮牌效果翻倍，且该花色第一次出现后才可打出。</li>
+                  <li>每轮开始前可亮黑桃 Q、方块 J、梅花 10 或红桃 A；亮牌效果翻倍，且该花色第一次出现并收墩后才可打出。</li>
                   <li>每轮结束自动累计分数，累计到 -1600 的玩家输掉本游戏。</li>
                 </ul>
               </section>
@@ -242,7 +250,7 @@ function render() {
       const played = document.createElement("div");
       played.className = `played ${shouldAnimate ? `dealFrom-${play.playerId}` : ""} ${game.phase === "collecting" ? "settledCard" : ""} ${isBuffCard(play.card) ? "buffPlayed" : ""}`;
       played.innerHTML = `<span>${player?.name ?? ""}</span>`;
-      played.append(cardButton(play.card, { disabled: true }));
+      played.append(cardButton(play.card, { disabled: true, revealed: isRevealed(game, play.card.id), collected: isCollectedRevealedCard(play.card) }));
       trickArea.append(played);
     }
   }
@@ -254,6 +262,7 @@ function render() {
     hand.append(
       cardButton(card, {
         revealed,
+        collected: isCollectedRevealedCard(card),
         locked,
         disabled: game.phase !== "playing" || game.currentPlayer !== 0 || !humanLegalCards.has(card.id) || game.finished,
         onClick: () => {
@@ -273,6 +282,7 @@ function render() {
         revealChoices.append(
           cardButton(card, {
             revealed: isRevealed(game, card.id),
+            collected: isCollectedRevealedCard(card),
             onClick: () => {
               game = toggleRevealCard(game, 0, card.id);
               render();

@@ -15,12 +15,28 @@ function saveSession() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
-  });
-  const data = await response.json();
-  if (!response.ok || data.error) throw new Error(data.error || "请求失败");
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers: { "content-type": "application/json", ...(options.headers || {}) },
+    });
+  } catch {
+    throw Object.assign(new Error("网络连接不稳定，请稍后重试"), { status: 0 });
+  }
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok || data.error) {
+    const error = new Error(data.error || `请求失败 (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -35,9 +51,9 @@ function cardButton(card, options = {}) {
   const red = card.suit === "hearts" || card.suit === "diamonds";
   const label = specialLabel(card);
   const button = document.createElement("button");
-  button.className = `card ${red ? "red" : "black"} ${label ? "specialCard" : ""} ${options.revealed ? "revealedCard" : ""} ${options.locked ? "lockedCard" : ""}`;
+  button.className = `card ${red ? "red" : "black"} ${label ? "specialCard" : ""} ${options.revealed ? "revealedCard" : ""} ${options.collected ? "collectedRevealCard" : ""} ${options.locked ? "lockedCard" : ""}`;
   button.disabled = Boolean(options.disabled);
-  button.innerHTML = `${label ? `<i>${label}</i>` : ""}<span>${card.rank}</span><strong>${suitLabel[card.suit]}</strong><small>${options.revealed ? "亮 x2" : suitName[card.suit]}</small>`;
+  button.innerHTML = `${label ? `<i>${label}</i>` : ""}<span>${card.rank}</span><strong>${suitLabel[card.suit]}</strong><small>${options.collected ? "已收回 x2" : options.revealed ? "亮 x2" : suitName[card.suit]}</small>`;
   if (options.onClick) button.addEventListener("click", options.onClick);
   return button;
 }
@@ -53,9 +69,14 @@ function pilePreview(cards, game, limit = 7) {
     .slice(-limit)
     .map((card) => {
       const revealed = isRevealed(game, card.id);
-      return `<span class="miniCard ${card.suit === "hearts" || card.suit === "diamonds" ? "red" : "black"} ${revealed ? "revealedMini" : ""}">${suitLabel[card.suit]}${card.rank}${revealed ? "×2" : ""}</span>`;
+      const label = specialLabel(card);
+      return `<span class="miniCard ${card.suit === "hearts" || card.suit === "diamonds" ? "red" : "black"} ${label ? "specialMini" : ""} ${revealed ? "revealedMini" : ""}">${label ? `<i>${label}</i>` : ""}${suitLabel[card.suit]}${card.rank}${revealed ? "×2" : ""}</span>`;
     })
     .join("");
+}
+
+function isCollectedRevealedCard(game, card) {
+  return isRevealed(game, card.id) && game.suitOpened.includes(card.suit);
 }
 
 function opponent(player, position, game) {
@@ -79,7 +100,7 @@ function seatList() {
           (seat) => `
             <div class="seat ${seat.you ? "youSeat" : ""}">
               <strong>${seat.occupied ? seat.name : "空位"}</strong>
-              <span>${seat.you ? "你" : seat.bot ? "人机" : seat.ready ? "已准备" : seat.occupied ? "已入座" : "等待加入"}</span>
+              <span>${seat.you ? (seat.ready ? "你 · 已完成亮牌" : "你") : seat.bot ? "人机" : seat.ready ? "已完成亮牌" : seat.occupied ? "已入座" : "等待加入"}</span>
             </div>
           `,
         )
@@ -103,8 +124,10 @@ function helpModals() {
                 <li>红桃 K：-40</li>
                 <li>红桃 Q：-30</li>
                 <li>红桃 J：-20</li>
+                <li>红桃 2/3/4/5：0</li>
                 <li>其他红桃：每张 -10</li>
-                <li>黑桃 Q：-100</li>
+                <li>收齐 13 张红桃：+200</li>
+                <li>黑桃 Q：-200</li>
                 <li>方块 J：+100</li>
                 <li>梅花 10：本家得分翻倍</li>
                 <li>亮牌：对应效果再翻倍</li>
@@ -127,7 +150,7 @@ function helpModals() {
                 <li>按逆时针出牌，必须跟首牌花色；没有该花色时可垫任意牌。</li>
                 <li>同花色最大牌赢得本墩，并获得下一墩先手。</li>
                 <li>红桃、黑桃 Q、方块 J、梅花 10 会进入赢家计分牌堆，普通牌进入弃牌堆。</li>
-                <li>每轮开始前可亮黑桃 Q、方块 J、梅花 10 或红桃 A；亮牌效果翻倍，且该花色第一次出现后才可打出。</li>
+                <li>每轮开始前可亮黑桃 Q、方块 J、梅花 10 或红桃 A；亮牌效果翻倍，且该花色第一次出现并收墩后才可打出。</li>
                 <li>每轮结束自动累计分数，累计到 -1600 的玩家输掉本游戏。</li>
               </ul>
             </section>
@@ -165,11 +188,21 @@ function bindHelpEvents() {
   });
 }
 
+function resetSession(message = "") {
+  window.clearTimeout(pollTimer);
+  session = {};
+  state = null;
+  errorMessage = message;
+  localStorage.removeItem(storageKey);
+  animatedPlayKey = "";
+}
+
 async function createRoom(name) {
   const data = await api("/api/rooms", { method: "POST", body: JSON.stringify({ name }) });
   session = { roomId: data.roomId, clientId: data.clientId, name };
   saveSession();
   state = data.state;
+  errorMessage = "";
   animatedPlayKey = "";
   render();
 }
@@ -182,6 +215,7 @@ async function joinRoom(roomId, name) {
   session = { roomId: data.roomId, clientId: data.clientId, name };
   saveSession();
   state = data.state;
+  errorMessage = "";
   animatedPlayKey = "";
   render();
 }
@@ -192,6 +226,7 @@ async function action(type, extra = {}) {
     body: JSON.stringify({ type, clientId: session.clientId, ...extra }),
   });
   state = data.state;
+  errorMessage = "";
   render();
 }
 
@@ -206,9 +241,7 @@ async function leaveRoom() {
       // Local cleanup is still useful if the room no longer exists.
     }
   }
-  session = {};
-  state = null;
-  localStorage.removeItem(storageKey);
+  resetSession();
   render();
 }
 
@@ -221,10 +254,15 @@ async function poll() {
     errorMessage = "";
     render(false);
   } catch (error) {
+    if (error.status === 404) {
+      resetSession("房间已失效，请重新创建或加入房间");
+      render(false);
+      return;
+    }
     errorMessage = error.message;
     render(false);
   } finally {
-    pollTimer = window.setTimeout(poll, 800);
+    if (session.roomId && session.clientId) pollTimer = window.setTimeout(poll, 800);
   }
 }
 
@@ -287,6 +325,7 @@ function renderRoom() {
   const canStart = state.seats.every((seat) => seat.occupied) && !game;
   const player = game && you >= 0 ? game.players[you] : null;
   const loser = game?.players.find((item) => item.totalScore <= -1600);
+  const youReady = you >= 0 && state.seats[you]?.ready;
 
   root.innerHTML = `
     <main class="appShell">
@@ -309,7 +348,7 @@ function renderRoom() {
       ${
         !game
           ? `<section class="waitingRoom"><strong>等待 4 名玩家入座</strong><span>把房间号 ${state.roomId} 发给朋友。</span></section>`
-          : renderGame(game, player, loser)
+          : renderGame(game, player, loser, youReady)
       }
       ${errorMessage ? `<p class="onlineError">${errorMessage}</p>` : ""}
       ${helpModals()}
@@ -329,8 +368,9 @@ function renderRoom() {
   bindGameEvents(game, player);
 }
 
-function renderGame(game, player, loser) {
+function renderGame(game, player, loser, youReady) {
   const inReveal = game.phase === "reveal";
+  const canShowRevealedCards = !inReveal || youReady;
   return `
     <section class="gameLayout">
       <div class="table">
@@ -353,7 +393,7 @@ function renderGame(game, player, loser) {
           </div>
           ${
             inReveal
-              ? `<div class="revealPanel"><div><strong>选择亮牌</strong><span>全部玩家准备后开始本轮</span></div><div class="revealChoices"></div><button class="primaryButton startRoundButton" data-action="ready">完成亮牌</button></div>`
+              ? `<div class="revealPanel ${youReady ? "readyReveal" : ""}"><div><strong>${youReady ? "已完成亮牌" : "选择亮牌"}</strong><span>${youReady ? "等待其他玩家完成亮牌" : "全部玩家准备后开始本轮"}</span></div><div class="revealChoices"></div><button class="primaryButton startRoundButton" data-action="ready" ${youReady ? "disabled" : ""}>${youReady ? "已完成亮牌" : "完成亮牌"}</button></div>`
               : ""
           }
           <div class="hand"></div>
@@ -362,12 +402,15 @@ function renderGame(game, player, loser) {
       <aside class="sidePanel">
         ${loser ? `<section><p class="lossBanner">${loser.name} 达到 ${loser.totalScore}，本游戏结算。</p></section>` : ""}
         <section><h2>亮牌</h2><div class="shownCards">${
-          game.revealedCards.length === 0
+          !canShowRevealedCards
+            ? '<span class="emptyPile">完成亮牌后显示</span>'
+            : game.revealedCards.length === 0
             ? '<span class="emptyPile">暂无亮牌</span>'
             : game.revealedCards
                 .map((item) => {
                   const owner = game.players.find((gamePlayer) => gamePlayer.id === item.playerId);
-                  return `<span class="shownCard">${owner?.name ?? ""} ${cardLabelFromId(item.cardId)} x2</span>`;
+                  const collected = game.suitOpened.includes(item.suit);
+                  return `<span class="shownCard ${collected ? "collectedShownCard" : ""}">${owner?.name ?? ""} ${cardLabelFromId(item.cardId)} x2${collected ? " · 收" : ""}</span>`;
                 })
                 .join("")
         }</div></section>
@@ -384,6 +427,7 @@ function renderGame(game, player, loser) {
 function bindGameEvents(game, player) {
   if (!game || !player) return;
   const lastPlayKey = game.lastPlayed ? `${game.lastPlayed.playerId}-${game.lastPlayed.card.id}` : "";
+  const youReady = state.you >= 0 && state.seats[state.you]?.ready;
   let renderedNewPlayAnimation = false;
 
   const nextPlayer = [2, 3, 1, 0];
@@ -413,7 +457,7 @@ function bindGameEvents(game, player) {
       const played = document.createElement("div");
       played.className = `played ${shouldAnimate ? directionClass.get(ownerIndex) || "" : ""} ${game.phase === "collecting" ? "settledCard" : ""} ${isBuffCard(play.card) ? "buffPlayed" : ""}`;
       played.innerHTML = `<span>${owner?.name ?? ""}</span>`;
-      played.append(cardButton(play.card, { disabled: true, revealed: isRevealed(game, play.card.id) }));
+      played.append(cardButton(play.card, { disabled: true, revealed: isRevealed(game, play.card.id), collected: isCollectedRevealedCard(game, play.card) }));
       trickArea.append(played);
     }
   }
@@ -424,6 +468,7 @@ function bindGameEvents(game, player) {
     hand.append(
       cardButton(card, {
         revealed: isRevealed(game, card.id),
+        collected: isCollectedRevealedCard(game, card),
         locked: isLockedRevealedCard(game, card),
         disabled: game.phase !== "playing" || game.currentPlayer !== state.you || !legal.has(card.id),
         onClick: () => action("playCard", { cardId: card.id }).catch(setError),
@@ -439,7 +484,9 @@ function bindGameEvents(game, player) {
       revealChoices.append(
         cardButton(card, {
           revealed: isRevealed(game, card.id),
-          onClick: () => action("toggleReveal", { cardId: card.id }).catch(setError),
+          collected: isCollectedRevealedCard(game, card),
+          disabled: youReady,
+          onClick: youReady ? null : () => action("toggleReveal", { cardId: card.id }).catch(setError),
         }),
       );
     }
@@ -461,7 +508,7 @@ function render(shouldPoll = true) {
   window.clearTimeout(pollTimer);
   if (!session.roomId || !session.clientId || !state) renderHome();
   else renderRoom();
-  if (shouldPoll) pollTimer = window.setTimeout(poll, 800);
+  if (shouldPoll && session.roomId && session.clientId) pollTimer = window.setTimeout(poll, 800);
 }
 
 if (session.roomId && session.clientId) {

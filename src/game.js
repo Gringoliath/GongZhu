@@ -62,14 +62,17 @@ export function scoreCards(cards, revealedCards = []) {
   let score = 0;
   let multiplier = 1;
   const revealedIds = new Set(revealedCards.map((item) => item.cardId));
+  const heartCount = cards.filter((card) => card.suit === "hearts").length;
+
+  if (heartCount === 13) score += 200;
 
   for (const card of cards) {
     const revealedMultiplier = revealedIds.has(card.id) ? 2 : 1;
-    if (card.suit === "hearts") {
-      const heartScore = card.rank === "A" ? 50 : card.rank === "K" ? 40 : card.rank === "Q" ? 30 : card.rank === "J" ? 20 : 10;
+    if (card.suit === "hearts" && heartCount !== 13) {
+      const heartScore = card.rank === "A" ? 50 : card.rank === "K" ? 40 : card.rank === "Q" ? 30 : card.rank === "J" ? 20 : ["2", "3", "4", "5"].includes(card.rank) ? 0 : 10;
       score -= heartScore * revealedMultiplier;
     }
-    if (card.suit === "spades" && card.rank === "Q") score -= 100 * revealedMultiplier;
+    if (card.suit === "spades" && card.rank === "Q") score -= 200 * revealedMultiplier;
     if (card.suit === "diamonds" && card.rank === "J") score += 100 * revealedMultiplier;
     if (card.suit === "clubs" && card.rank === "10") multiplier *= 2 * revealedMultiplier;
   }
@@ -126,7 +129,7 @@ export function startRevealPhase(state) {
   return {
     ...state,
     phase: "reveal",
-    message: "本轮开始前，可亮黑桃Q、方块J、梅花10或红桃A。亮牌效果翻倍，且该花色首次出现后才能打出。",
+    message: "本轮开始前，可亮黑桃Q、方块J、梅花10或红桃A。亮牌效果翻倍，且该花色首次出现并收墩后才能打出。",
   };
 }
 
@@ -184,7 +187,6 @@ export function playCard(state, playerIndex, cardId) {
   const card = player.hand.find((item) => item.id === cardId);
   if (!card) return state;
 
-  const suitOpened = state.suitOpened.includes(card.suit) ? state.suitOpened : [...state.suitOpened, card.suit];
   const players = state.players.map((item, index) =>
     index === playerIndex ? { ...item, hand: item.hand.filter((handCard) => handCard.id !== cardId) } : item,
   );
@@ -197,7 +199,6 @@ export function playCard(state, playerIndex, cardId) {
     lastPlayed: { playerId: player.id, card },
     lastWinner: null,
     lastCompletedTrick: null,
-    suitOpened,
   };
 
   if (trick.length < 4) {
@@ -214,6 +215,8 @@ export function playCard(state, playerIndex, cardId) {
     .reduce((best, play) => (rankValue.get(play.card.rank) > rankValue.get(best.card.rank) ? play : best));
   const winnerIndex = players.findIndex((item) => item.id === winnerPlay.playerId);
   const trickCards = trick.map((play) => play.card);
+  const collectedSuits = [...new Set(trickCards.map((trickCard) => trickCard.suit))];
+  const suitOpened = [...new Set([...state.suitOpened, ...collectedSuits])];
   const buffCards = trickCards.filter(isBuffCard);
   const plainCards = trickCards.filter((trickCard) => !isBuffCard(trickCard));
   const nextPlayers = players.map((item, index) => {
@@ -236,6 +239,7 @@ export function playCard(state, playerIndex, cardId) {
     currentPlayer: winnerIndex,
     trickNumber: state.trickNumber + 1,
     phase: "collecting",
+    suitOpened,
     lastWinner: nextPlayers[winnerIndex].id,
     finished: roundFinished,
     gameOver,
