@@ -7,6 +7,8 @@ let state = null;
 let errorMessage = "";
 let pollTimer = 0;
 let animatedPlayKey = "";
+let scoreHelpOpen = false;
+let rulesOpen = false;
 
 function saveSession() {
   localStorage.setItem(storageKey, JSON.stringify(session));
@@ -86,6 +88,83 @@ function seatList() {
   `;
 }
 
+function helpModals() {
+  return `
+    ${
+      scoreHelpOpen
+        ? `<div class="modalBackdrop" data-action="close-score-help">
+            <section class="scoreHelp" role="dialog" aria-modal="true">
+              <div>
+                <h2>牌分</h2>
+                <button type="button" class="ghostButton" data-action="close-score-help">关闭</button>
+              </div>
+              <ul class="ruleList">
+                <li>红桃 A：-50</li>
+                <li>红桃 K：-40</li>
+                <li>红桃 Q：-30</li>
+                <li>红桃 J：-20</li>
+                <li>其他红桃：每张 -10</li>
+                <li>黑桃 Q：-100</li>
+                <li>方块 J：+100</li>
+                <li>梅花 10：本家得分翻倍</li>
+                <li>亮牌：对应效果再翻倍</li>
+                <li>累计分到 -1600 的玩家判负</li>
+              </ul>
+            </section>
+          </div>`
+        : ""
+    }
+    ${
+      rulesOpen
+        ? `<div class="modalBackdrop" data-action="close-rules">
+            <section class="scoreHelp" role="dialog" aria-modal="true">
+              <div>
+                <h2>规则简介</h2>
+                <button type="button" class="ghostButton" data-action="close-rules">关闭</button>
+              </div>
+              <ul class="ruleList">
+                <li>每轮四人各 13 张，摸到梅花 2 的玩家先出。</li>
+                <li>按逆时针出牌，必须跟首牌花色；没有该花色时可垫任意牌。</li>
+                <li>同花色最大牌赢得本墩，并获得下一墩先手。</li>
+                <li>红桃、黑桃 Q、方块 J、梅花 10 会进入赢家计分牌堆，普通牌进入弃牌堆。</li>
+                <li>每轮开始前可亮黑桃 Q、方块 J、梅花 10 或红桃 A；亮牌效果翻倍，且该花色第一次出现后才可打出。</li>
+                <li>每轮结束自动累计分数，累计到 -1600 的玩家输掉本游戏。</li>
+              </ul>
+            </section>
+          </div>`
+        : ""
+    }
+  `;
+}
+
+function bindHelpEvents() {
+  root.querySelector('[data-action="rules"]')?.addEventListener("click", () => {
+    rulesOpen = true;
+    render();
+  });
+
+  root.querySelector('[data-action="score-help"]')?.addEventListener("click", () => {
+    scoreHelpOpen = true;
+    render();
+  });
+
+  root.querySelectorAll('[data-action="close-score-help"]').forEach((button) => {
+    button.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget && event.currentTarget.classList.contains("modalBackdrop")) return;
+      scoreHelpOpen = false;
+      render();
+    });
+  });
+
+  root.querySelectorAll('[data-action="close-rules"]').forEach((button) => {
+    button.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget && event.currentTarget.classList.contains("modalBackdrop")) return;
+      rulesOpen = false;
+      render();
+    });
+  });
+}
+
 async function createRoom(name) {
   const data = await api("/api/rooms", { method: "POST", body: JSON.stringify({ name }) });
   session = { roomId: data.roomId, clientId: data.clientId, name };
@@ -158,6 +237,8 @@ function renderHome() {
           <h1>联网房间</h1>
         </div>
         <div class="topActions">
+          <button class="ghostButton" data-action="rules">规则</button>
+          <button class="ghostButton" data-action="score-help">牌分</button>
           <a class="ghostLink" href="/">返回单机版</a>
         </div>
       </header>
@@ -175,6 +256,7 @@ function renderHome() {
         </div>
       </section>
       ${errorMessage ? `<p class="onlineError">${errorMessage}</p>` : ""}
+      ${helpModals()}
     </main>
   `;
 
@@ -195,6 +277,8 @@ function renderHome() {
       render();
     }
   });
+
+  bindHelpEvents();
 }
 
 function renderRoom() {
@@ -212,6 +296,8 @@ function renderRoom() {
           <h1>联网拱猪</h1>
         </div>
         <div class="topActions">
+          <button class="ghostButton" data-action="rules">规则</button>
+          <button class="ghostButton" data-action="score-help">牌分</button>
           <button class="ghostButton" data-action="copy">复制房间号</button>
           <button class="ghostButton" data-action="leave">离开房间</button>
           ${!game ? '<button class="ghostButton" data-action="add-bot">添加人机</button>' : ""}
@@ -226,9 +312,11 @@ function renderRoom() {
           : renderGame(game, player, loser)
       }
       ${errorMessage ? `<p class="onlineError">${errorMessage}</p>` : ""}
+      ${helpModals()}
     </main>
   `;
 
+  bindHelpEvents();
   root.querySelector('[data-action="copy"]')?.addEventListener("click", async () => {
     await navigator.clipboard?.writeText(state.roomId);
   });
